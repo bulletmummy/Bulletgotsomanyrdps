@@ -57,13 +57,12 @@ jobs:
           (Get-Process -Id $PID).PriorityClass = "High"
           Write-Host "System tuned"
 
-      - name: "🐍 Python Latest — Pre-Install"
+      - name: "🐍 Python Install"
         shell: pwsh
         run: |
-          $api    = Invoke-RestMethod "https://endoflife.date/api/python.json"
-          $latest = ($api | Where-Object { $_.eol -eq $false } | Select-Object -First 1).latest
-          Write-Host "Installing Python $latest"
-          $url = "https://www.python.org/ftp/python/$latest/python-$latest-amd64.exe"
+          $ver = "3.12.9"
+          $url = "https://www.python.org/ftp/python/$ver/python-$ver-amd64.exe"
+          Write-Host "Installing Python $ver"
           Invoke-WebRequest $url -OutFile "$env:TEMP\py.exe" -UseBasicParsing
           Start-Process "$env:TEMP\py.exe" `
             -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_pip=1" `
@@ -73,7 +72,7 @@ jobs:
           python --version
           pip install --upgrade pip --quiet
           pip install --quiet instagrapi requests psutil pillow cryptography python-telegram-bot schedule telethon
-          Write-Host "Python $latest + packages ready"
+          Write-Host "Python $ver + packages ready"
           $pyPath = (Get-Command python).Source
           $pyPath | Out-File "C:\Windows\Temp\python_path.txt"
 
