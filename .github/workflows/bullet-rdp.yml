@@ -52,7 +52,7 @@ jobs:
             Set-Service  $s -StartupType Disabled -EA SilentlyContinue
           }
           foreach ($p in @("OneDrive","Teams","Cortana","SearchIndexer","MsMpEng")) {
-            Stop-Process $p -Force -EA SilentlyContinue
+            Stop-Process -Name $p -Force -EA SilentlyContinue
           }
           (Get-Process -Id $PID).PriorityClass = "High"
           Write-Host "System tuned"
