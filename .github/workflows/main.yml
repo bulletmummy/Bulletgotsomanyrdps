@@ -1,1 +1,194 @@
-test
+name: "⚡ BULLET RDP — Auto Deploy"
+
+on:
+  workflow_dispatch:
+    inputs:
+      INSTANCE:
+        description: "Instance number"
+        required: true
+        default: "1"
+      PARALLEL:
+        description: "Dual parallel? (yes/no)"
+        required: false
+        default: "no"
+
+jobs:
+  bullet-primary:
+    name: "🔫 BULLET — Instance ${{ github.event.inputs.INSTANCE }}"
+    runs-on: windows-latest
+
+    env:
+      INSTANCE_ID:     ${{ github.event.inputs.INSTANCE }}
+      SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
+      NGROK_SHAHZAIB:  ${{ secrets.NGROK_SHAHZAIB }}
+      TG_BOT_TOKEN:    ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID:      ${{ secrets.TG_CHAT_ID }}
+      ALLOWED_USERS:   ${{ secrets.ALLOWED_USERS }}
+      REPO:            ${{ github.repository }}
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: "🔐 Validate Secrets"
+        shell: pwsh
+        run: |
+          $m = @()
+          if (!$env:SECRET_SHAHZAIB) { $m += "SECRET_SHAHZAIB" }
+          if (!$env:NGROK_SHAHZAIB)  { $m += "NGROK_SHAHZAIB" }
+          if (!$env:TG_BOT_TOKEN)    { $m += "TG_BOT_TOKEN" }
+          if (!$env:TG_CHAT_ID)      { $m += "TG_CHAT_ID" }
+          if ($m.Count -gt 0) { Write-Error "Missing: $($m -join ', ')"; exit 1 }
+          Write-Host "Secrets OK"
+
+      - name: "⚙️ System Tune"
+        shell: pwsh
+        run: |
+          $svcs = @("SysMain","WSearch","wuauserv","DiagTrack","dmwappushservice",
+            "MapsBroker","XblAuthManager","XblGameSave","XboxNetApiSvc",
+            "lfsvc","PhoneSvc","PrintSpooler","RemoteRegistry","Fax","WerSvc")
+          foreach ($s in $svcs) {
+            Stop-Service $s -Force -EA SilentlyContinue
+            Set-Service  $s -StartupType Disabled -EA SilentlyContinue
+          }
+          foreach ($p in @("OneDrive","Teams","Cortana","SearchIndexer","MsMpEng")) {
+            Stop-Process $p -Force -EA SilentlyContinue
+          }
+          (Get-Process -Id $PID).PriorityClass = "High"
+          Write-Host "System tuned"
+
+      - name: "🐍 Python Latest — Pre-Install"
+        shell: pwsh
+        run: |
+          $api    = Invoke-RestMethod "https://endoflife.date/api/python.json"
+          $latest = ($api | Where-Object { $_.eol -eq $false } | Select-Object -First 1).latest
+          Write-Host "Installing Python $latest"
+          $url = "https://www.python.org/ftp/python/$latest/python-$latest-amd64.exe"
+          Invoke-WebRequest $url -OutFile "$env:TEMP\py.exe" -UseBasicParsing
+          Start-Process "$env:TEMP\py.exe" `
+            -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_pip=1" `
+            -Wait -NoNewWindow
+          $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+                      [System.Environment]::GetEnvironmentVariable("PATH","User")
+          python --version
+          pip install --upgrade pip --quiet
+          pip install --quiet instagrapi requests psutil pillow cryptography python-telegram-bot schedule telethon
+          Write-Host "Python $latest + packages ready"
+          $pyPath = (Get-Command python).Source
+          $pyPath | Out-File "C:\Windows\Temp\python_path.txt"
+
+      - name: "🌐 Chrome Silent Install"
+        shell: pwsh
+        run: |
+          $c = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+          if (!(Test-Path $c)) {
+            Invoke-WebRequest "https://dl.google.com/chrome/install/latest/chrome_installer.exe" `
+              -OutFile "$env:TEMP\chrome.exe" -UseBasicParsing
+            Start-Process "$env:TEMP\chrome.exe" -ArgumentList "/silent /install" -Wait -NoNewWindow
+          }
+          Write-Host "Chrome ready"
+
+      - name: "🤖 Automa Extension Pre-Install"
+        shell: pwsh
+        run: |
+          $extID = "infppggnoaenmfagbfknfkancpbljcca"
+          $paths = @(
+            "HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist",
+            "HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallAllowlist"
+          )
+          foreach ($p in $paths) {
+            if (!(Test-Path $p)) { New-Item $p -Force | Out-Null }
+          }
+          $existing = (Get-Item $paths[0]).Property.Count
+          Set-ItemProperty -Path $paths[0] -Name "$($existing+1)" `
+            -Value "$extID;https://clients2.google.com/service/update2/crx"
+          $crxUrl  = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=120.0&acceptformat=crx3&x=id%3D$extID%26uc"
+          $crxPath = "C:\Windows\Temp\automa.crx"
+          try {
+            Invoke-WebRequest $crxUrl -OutFile $crxPath -UseBasicParsing
+            Write-Host "Automa CRX cached"
+          } catch {
+            Write-Host "CRX cache failed — policy install will handle it"
+          }
+          Write-Host "Automa force-policy set"
+
+      - name: "🖼️ Bullet Wallpaper"
+        shell: pwsh
+        run: |
+          $wp = "$env:TEMP\bullet_wallpaper.png"
+          try {
+            Invoke-WebRequest "https://raw.githubusercontent.com/$env:REPO/main/bullet_wallpaper.png" -OutFile $wp -UseBasicParsing
+            $src = 'using System; using System.Runtime.InteropServices; public class WP { [DllImport("user32.dll",CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int a,int b,string c,int d); }'
+            Add-Type -TypeDefinition $src -Language CSharp
+            [WP]::SystemParametersInfo(20,0,$wp,3) | Out-Null
+            Copy-Item $wp "C:\Windows\Temp\bullet_wallpaper.png" -Force
+            Write-Host "Wallpaper set"
+          } catch {
+            Write-Host "Push bullet_wallpaper.png to repo root to enable wallpaper"
+          }
+
+      - name: "🔌 Enable RDP"
+        shell: pwsh
+        run: |
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 0
+          Write-Host "RDP enabled"
+
+      - name: "🔧 Ngrok Pre-Download + Auth"
+        shell: pwsh
+        run: |
+          $ngDir = "C:\Windows\Temp\ngrok"
+          $ng    = "$ngDir\ngrok.exe"
+          if (!(Test-Path $ng)) {
+            New-Item $ngDir -ItemType Directory -Force | Out-Null
+            Invoke-WebRequest "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" `
+              -OutFile "$env:TEMP\ngrok.zip" -UseBasicParsing
+            Expand-Archive "$env:TEMP\ngrok.zip" -DestinationPath $ngDir -Force
+          }
+          & $ng config add-authtoken $env:NGROK_SHAHZAIB
+          Write-Host "Ngrok ready"
+
+      - name: "📌 Chrome Auto-Launch on RDP Login"
+        shell: pwsh
+        run: |
+          $allUsersStartup = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\chrome_startup.ps1" "$allUsersStartup\BulletChrome.ps1" -Force
+          $bat = "@echo off`npowershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$allUsersStartup\BulletChrome.ps1`""
+          $bat | Out-File "$allUsersStartup\BulletChrome.bat" -Encoding ascii
+          $regRun = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
+          Set-ItemProperty $regRun -Name "BulletChrome" `
+            -Value "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$allUsersStartup\BulletChrome.ps1`""
+          Write-Host "Chrome auto-launch configured"
+
+      - name: "📁 Upload Folder Setup"
+        shell: pwsh
+        run: |
+          $dirs = @("C:\Users\Public\uploads","C:\Users\Public\ig_sessions","C:\Users\Public\scripts")
+          foreach ($d in $dirs) {
+            New-Item $d -ItemType Directory -Force | Out-Null
+            icacls $d /grant "Everyone:(OI)(CI)F" /T | Out-Null
+          }
+          Write-Host "Upload folders ready"
+
+      - name: "🤖 Telegram Bot Launch"
+        shell: pwsh
+        run: |
+          pip install psutil --quiet
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\bullet_bot.py" "C:\Windows\Temp\bullet_bot.py" -Force
+          Start-Process python -ArgumentList "C:\Windows\Temp\bullet_bot.py" -NoNewWindow
+          Write-Host "Bot live"
+
+      - name: "⏰ Self-Trigger Keepalive (24/7)"
+        shell: pwsh
+        run: |
+          Start-Sleep -Seconds 21000
+          $h = @{ Authorization="token $env:SECRET_SHAHZAIB"; Accept="application/vnd.github.v3+json" }
+          $b = @{ ref="main"; inputs=@{
+            INSTANCE="$([int]$env:INSTANCE_ID+1)"
+            PARALLEL="${{ github.event.inputs.PARALLEL }}"
+          }} | ConvertTo-Json
+          Invoke-RestMethod `
+            -Uri "https://api.github.com/repos/$env:REPO/actions/workflows/bullet-rdp.yml/dispatches" `
+            -Method POST -Headers $h -Body $b -ContentType "application/json"
+          Write-Host "Next cycle triggered"
