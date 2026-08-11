@@ -170,48 +170,30 @@ jobs:
           }
           Write-Host "Upload folders ready"
 
-      - name: "🤖 Telegram Bot Launch"
+      - name: "🤖 Bot + Keepalive"
         shell: pwsh
-        env:
-          TG_BOT_TOKEN:    ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID:      ${{ secrets.TG_CHAT_ID }}
-          ALLOWED_USERS:   ${{ secrets.ALLOWED_USERS }}
-          NGROK_SHAHZAIB:  ${{ secrets.NGROK_SHAHZAIB }}
-          SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
         run: |
           pip install psutil --quiet
           Copy-Item "$env:GITHUB_WORKSPACE\scripts\bullet_bot.py" "C:\Windows\Temp\bullet_bot.py" -Force
 
-          # Write env to file for bot
-          $lines = @(
-            "import os",
-            "os.environ['TG_BOT_TOKEN']    = '$env:TG_BOT_TOKEN'",
-            "os.environ['TG_CHAT_ID']      = '$env:TG_CHAT_ID'",
-            "os.environ['ALLOWED_USERS']   = '$env:ALLOWED_USERS'",
-            "os.environ['NGROK_SHAHZAIB']  = '$env:NGROK_SHAHZAIB'",
-            "os.environ['SECRET_SHAHZAIB'] = '$env:SECRET_SHAHZAIB'",
-            "os.environ['REPO']            = '$env:REPO'"
-          )
-          $lines | Out-File "C:\Windows\Temp\bullet_env.py" -Encoding utf8
-
-          # Prepend env loader to bot
-          $envContent = Get-Content "C:\Windows\Temp\bullet_env.py" -Raw
-          $botContent = Get-Content "C:\Windows\Temp\bullet_bot.py" -Raw
-          ($envContent + "`n" + $botContent) | Out-File "C:\Windows\Temp\bullet_final.py" -Encoding utf8
-
-          # Run bot directly in background job
-          $job = Start-Job -ScriptBlock {
-            python "C:\Windows\Temp\bullet_final.py"
+          # Start bot as separate python process with full env inherited
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = "python"
+          $psi.Arguments = "C:\Windows\Temp\bullet_bot.py"
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.RedirectStandardOutput = $false
+          $psi.RedirectStandardError = $false
+          $proc = [System.Diagnostics.Process]::Start($psi)
+          Write-Host "Bot PID: $($proc.Id)"
+          Start-Sleep -Seconds 10
+          if (-not $proc.HasExited) {
+            Write-Host "Bot running OK"
+          } else {
+            Write-Host "Bot exited — check token"
           }
-          Start-Sleep -Seconds 8
-          Write-Host "Bot job state: $($job.State) — ID: $($job.Id)"
-          $proc = Get-Process python -EA SilentlyContinue
-          if ($proc) { Write-Host "Python confirmed — PID $($proc.Id)" }
-          else { Write-Host "WARNING: python not found" }
 
-      - name: "⏰ Self-Trigger Keepalive (24/7)"
-        shell: pwsh
-        run: |
+          # Keepalive loop
           Start-Sleep -Seconds 21000
           $h = @{ Authorization="token $env:SECRET_SHAHZAIB"; Accept="application/vnd.github.v3+json" }
           $b = @{ ref="main"; inputs=@{
