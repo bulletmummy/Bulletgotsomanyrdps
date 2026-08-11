@@ -86,37 +86,55 @@ def spawn_rdp(chat_id):
     rdp_pass = f"Bullet{slot}@6767"
     api_port = 4040 + slot - 1
 
-    send(chat_id, f"⏳ Spawning RDP `#{slot}` — ~15 sec...")
+    send(chat_id, f"⏳ Spawning RDP #{slot} — ~30 sec...")
 
     try:
+        # Create RDP user
         subprocess.run(f"net user {rdp_user} {rdp_pass} /add", shell=True, capture_output=True)
         subprocess.run(f"net localgroup administrators {rdp_user} /add", shell=True, capture_output=True)
 
-        log_f = f"C:\\Windows\\Temp\\ngrok_rdp{slot}.log"
-        proc  = subprocess.Popen(
-            f'"{NGROK_BIN}" tcp 3389 --log=stdout --web-addr=localhost:{api_port}',
-            shell=True,
-            stdout=open(log_f,"w"),
-            stderr=subprocess.STDOUT
+        # Kill any existing ngrok on this port
+        subprocess.run(f"taskkill /F /FI \"WINDOWTITLE eq ngrok*\" /T", shell=True, capture_output=True)
+        time.sleep(2)
+
+        # Launch ngrok detached — CREATE_NEW_PROCESS_GROUP + no shell
+        log_f   = f"C:\\Windows\\Temp\\ngrok_rdp{slot}.log"
+        ng_cmd  = [str(NGROK_BIN), "tcp", "3389", "--log=stdout", f"--web-addr=localhost:{api_port}"]
+        
+        DETACHED = 0x00000008
+        CREATE_NEW = 0x00000200
+        proc = subprocess.Popen(
+            ng_cmd,
+            stdout=open(log_f, "w"),
+            stderr=subprocess.STDOUT,
+            creationflags=DETACHED | CREATE_NEW,
+            close_fds=True
         )
 
-        time.sleep(8)
+        # Wait for tunnel — up to 60 sec
+        time.sleep(5)
         tunnel = ""
-        for _ in range(15):
+        for _ in range(25):
             try:
-                res    = requests.get(f"http://localhost:{api_port}/api/tunnels", timeout=3)
-                tuns   = res.json().get("tunnels",[])
+                res  = requests.get(f"http://localhost:{api_port}/api/tunnels", timeout=3)
+                tuns = res.json().get("tunnels", [])
                 if tuns:
                     tunnel = tuns[0]["public_url"]
                     break
-            except: pass
+            except:
+                pass
             time.sleep(2)
 
         if not tunnel:
-            send(chat_id, f"❌ RDP `#{slot}` tunnel failed — check ngrok token.")
+            # Try reading log for error
+            try:
+                log_txt = open(log_f).read()[-500:]
+            except:
+                log_txt = "no log"
+            send(chat_id, f"❌ RDP #{slot} tunnel failed\nLog: {log_txt}")
             return
 
-        hp       = tunnel.replace("tcp://","").split(":")
+        hp       = tunnel.replace("tcp://", "").split(":")
         rdp_host = hp[0]
         rdp_port = hp[1]
 
@@ -128,17 +146,15 @@ def spawn_rdp(chat_id):
         }
 
         send(chat_id,
-            f"✅ *RDP #{slot} LIVE*\n\n"
-            f"🖥️ Host: `{rdp_host}`\n"
-            f"🔌 Port: `{rdp_port}`\n"
-            f"👤 User: `{rdp_user}`\n"
-            f"🔑 Pass: `{rdp_pass}`\n"
-            f"⏰ {rdp_registry[slot]['created_at']}\n\n"
-            f"_Chrome + Automa auto-launch on login._\n"
-            f"_Other RDPs untouched._")
+            f"✅ RDP #{slot} LIVE\n\n"
+            f"Host: {rdp_host}\n"
+            f"Port: {rdp_port}\n"
+            f"User: {rdp_user}\n"
+            f"Pass: {rdp_pass}\n"
+            f"Time: {rdp_registry[slot]['created_at']}")
 
     except Exception as ex:
-        send(chat_id, f"❌ Spawn error: `{ex}`")
+        send(chat_id, f"❌ Spawn error: {ex}")
 
 def kill_rdp(slot, chat_id):
     if slot not in rdp_registry:
