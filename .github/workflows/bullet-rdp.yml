@@ -175,8 +175,16 @@ jobs:
         run: |
           pip install psutil --quiet
           Copy-Item "$env:GITHUB_WORKSPACE\scripts\bullet_bot.py" "C:\Windows\Temp\bullet_bot.py" -Force
-          Start-Process python -ArgumentList "C:\Windows\Temp\bullet_bot.py" -NoNewWindow
-          Write-Host "Bot live"
+          # Launch bot as scheduled task so it survives step completion
+          $action  = New-ScheduledTaskAction -Execute "python.exe" -Argument "C:\Windows\Temp\bullet_bot.py"
+          $trigger = New-ScheduledTaskTrigger -AtStartup
+          $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 6) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+          $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+          Register-ScheduledTask -TaskName "BulletBot" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
+          Start-ScheduledTask -TaskName "BulletBot"
+          Start-Sleep -Seconds 5
+          $state = (Get-ScheduledTask -TaskName "BulletBot").State
+          Write-Host "Bot launched via Task Scheduler — State: $state"
 
       - name: "⏰ Self-Trigger Keepalive (24/7)"
         shell: pwsh
