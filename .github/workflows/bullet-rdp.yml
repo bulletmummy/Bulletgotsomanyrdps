@@ -172,19 +172,42 @@ jobs:
 
       - name: "🤖 Telegram Bot Launch"
         shell: pwsh
+        env:
+          TG_BOT_TOKEN:    ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID:      ${{ secrets.TG_CHAT_ID }}
+          ALLOWED_USERS:   ${{ secrets.ALLOWED_USERS }}
+          NGROK_SHAHZAIB:  ${{ secrets.NGROK_SHAHZAIB }}
+          SECRET_SHAHZAIB: ${{ secrets.SECRET_SHAHZAIB }}
         run: |
           pip install psutil --quiet
           Copy-Item "$env:GITHUB_WORKSPACE\scripts\bullet_bot.py" "C:\Windows\Temp\bullet_bot.py" -Force
-          # Launch bot as scheduled task so it survives step completion
-          $action  = New-ScheduledTaskAction -Execute "python.exe" -Argument "C:\Windows\Temp\bullet_bot.py"
-          $trigger = New-ScheduledTaskTrigger -AtStartup
-          $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Hours 6) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
-          $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
-          Register-ScheduledTask -TaskName "BulletBot" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-          Start-ScheduledTask -TaskName "BulletBot"
-          Start-Sleep -Seconds 5
-          $state = (Get-ScheduledTask -TaskName "BulletBot").State
-          Write-Host "Bot launched via Task Scheduler — State: $state"
+
+          # Write env to file for bot
+          $lines = @(
+            "import os",
+            "os.environ['TG_BOT_TOKEN']    = '$env:TG_BOT_TOKEN'",
+            "os.environ['TG_CHAT_ID']      = '$env:TG_CHAT_ID'",
+            "os.environ['ALLOWED_USERS']   = '$env:ALLOWED_USERS'",
+            "os.environ['NGROK_SHAHZAIB']  = '$env:NGROK_SHAHZAIB'",
+            "os.environ['SECRET_SHAHZAIB'] = '$env:SECRET_SHAHZAIB'",
+            "os.environ['REPO']            = '$env:REPO'"
+          )
+          $lines | Out-File "C:\Windows\Temp\bullet_env.py" -Encoding utf8
+
+          # Prepend env loader to bot
+          $envContent = Get-Content "C:\Windows\Temp\bullet_env.py" -Raw
+          $botContent = Get-Content "C:\Windows\Temp\bullet_bot.py" -Raw
+          ($envContent + "`n" + $botContent) | Out-File "C:\Windows\Temp\bullet_final.py" -Encoding utf8
+
+          # Run bot directly in background job
+          $job = Start-Job -ScriptBlock {
+            python "C:\Windows\Temp\bullet_final.py"
+          }
+          Start-Sleep -Seconds 8
+          Write-Host "Bot job state: $($job.State) — ID: $($job.Id)"
+          $proc = Get-Process python -EA SilentlyContinue
+          if ($proc) { Write-Host "Python confirmed — PID $($proc.Id)" }
+          else { Write-Host "WARNING: python not found" }
 
       - name: "⏰ Self-Trigger Keepalive (24/7)"
         shell: pwsh
