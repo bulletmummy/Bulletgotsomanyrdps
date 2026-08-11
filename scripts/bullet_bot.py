@@ -128,7 +128,7 @@ def spawn_rdp(chat_id):
         }
 
         send(chat_id,
-            f"✅ *RDP \#{slot} LIVE*\n\n"
+            f"✅ *RDP #{slot} LIVE*\n\n"
             f"🖥️ Host: `{rdp_host}`\n"
             f"🔌 Port: `{rdp_port}`\n"
             f"👤 User: `{rdp_user}`\n"
